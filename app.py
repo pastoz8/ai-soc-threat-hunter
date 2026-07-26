@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import sqlite3
 import httpx
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -13,60 +14,73 @@ from datetime import datetime
 load_dotenv()
 client = OpenAI()
 
-st.set_page_config(page_title="AI & ML SOC Threat Hunter Workbench", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Enterprise AI & ML SOC Workbench", page_icon="🛡️", layout="wide")
 
-# Initialize Session State for Case History
-if "history" not in st.session_state:
-    st.session_state.history = []
+# --- DATABASE SETUP (SQLITE PERSISTENCE) ---
+def init_db():
+    conn = sqlite3.connect("soc_workbench.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS investigations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            query TEXT,
+            report TEXT
+        )
+    """)
+    conn.commit()
+    return conn
 
-st.title("🛡️ AI & Machine Learning SOC Threat Hunter Workbench")
-st.markdown("Autonomous threat intelligence, **Unsupervised ML Anomaly Detection (Isolation Forest)**, **MITRE ATT&CK mapping**, and **Automated Detection Engineering**.")
+db_conn = init_db()
 
-# --- SIDEBAR: CASE HISTORY ARCHIVE ---
+st.title("🛡️ Enterprise AI & ML SOC Threat Hunter Workbench")
+st.markdown("Autonomous threat intelligence, **Persistent SQLite Database Storage**, **Isolation Forest ML anomaly scoring**, and **Automated Detection Engineering**.")
+
+# --- SIDEBAR: PERSISTENT CASE HISTORY ARCHIVE ---
 st.sidebar.title("📁 Investigation Cases")
-st.sidebar.markdown("Active session history of threat hunts:")
+st.sidebar.markdown("Persistent database history of past threat hunts:")
+
+# Fetch history from SQLite database
+cursor = db_conn.cursor()
+cursor.execute("SELECT id, timestamp, query, report FROM investigations ORDER BY id DESC")
+saved_cases = cursor.fetchall()
 
 selected_case = None
-if st.session_state.history:
-    case_titles = [f"Case #{i+1}: {c['query'][:30]}..." for i, c in enumerate(st.session_state.history)]
+if saved_cases:
+    case_titles = [f"Case #{c[0]} ({c[1]}): {c[2][:25]}..." for c in saved_cases]
     selected_index = st.sidebar.selectbox("Select Past Investigation", range(len(case_titles)), format_func=lambda x: case_titles[x])
     if st.sidebar.button("Load Selected Case"):
-        selected_case = st.session_state.history[selected_index]
+        selected_case = saved_cases[selected_index]
 else:
-    st.sidebar.info("No investigations logged in this session yet.")
+    st.sidebar.info("No investigations stored in database yet.")
 
-if st.sidebar.button("Clear History"):
-    st.session_state.history = []
+if st.sidebar.button("Clear Database History"):
+    cursor.execute("DELETE FROM investigations")
+    db_conn.commit()
     st.rerun()
 
 # Main Input Form
-default_query = selected_case["query"] if selected_case else """[ALERT] Potential anomaly detected across corporate network traffic. 
-Raw log snippet: Unusual outbound data transfer and failed auth spikes. 
-Suspicious external IP: 185.220.101.5. Dropped file hash: 44d88612fea8a8f36de82e1278abb02f."""
+default_query = selected_case[2] if selected_case else """[ALERT] Potential C2 beacon detected on workstation WS-089. 
+Raw log snippet: Connection established from internal IP 10.0.4.5 to external suspicious IP 185.220.101.5 over port 443. 
+Associated dropped file hash on disk: 44d88612fea8a8f36de82e1278abb02f. Please investigate and map to MITRE ATT&CK."""
 
-user_query = st.text_area("Paste Log Data or Incident Ticket for AI & ML Analysis:", default_query, height=120)
+user_query = st.text_area("Investigation Query / Log Artifacts / Incident Ticket:", default_query, height=130)
 
 # --- MACHINE LEARNING MODULE: ISOLATION FOREST ANOMALY SCORING ---
 st.subheader("🤖 Machine Learning Behavioral Outlier Scoring")
-st.markdown("Simulating baseline network telemetry analysis using an unsupervised Isolation Forest model:")
-
-# Generate sample baseline network flow logs for demonstration
 np.random.seed(42)
-normal_traffic = np.random.normal(loc=500, scale=100, size=(95, 2)) # Normal bytes/duration
-outlier_traffic = np.array([[4500, 1200], [3800, 950], [5200, 1500]]) # Anomalous heavy data exfiltration
+normal_traffic = np.random.normal(loc=500, scale=100, size=(95, 2))
+outlier_traffic = np.array([[4500, 1200], [3800, 950], [5200, 1500]])
 synthetic_data = np.vstack([normal_traffic, outlier_traffic])
 
 df_logs = pd.DataFrame(synthetic_data, columns=["Bytes_Transferred", "Session_Duration_Sec"])
 df_logs["Source_IP"] = [f"10.0.4.{i%254}" for i in range(len(df_logs))]
-df_logs.loc[95:, "Source_IP"] = "185.220.101.5" # Tag our threat IP as an outlier source
+df_logs.loc[95:, "Source_IP"] = "185.220.101.5"
 
-# Train Isolation Forest model
 iso_model = IsolationForest(contamination=0.03, random_state=42)
 df_logs["Anomaly_Score"] = iso_model.fit_predict(df_logs[["Bytes_Transferred", "Session_Duration_Sec"]])
-# Convert -1 (outlier) to "High Risk Outlier" and 1 to "Normal"
 df_logs["ML_Verdict"] = df_logs["Anomaly_Score"].apply(lambda x: "🚨 Outlier (Anomalous)" if x == -1 else "Normal")
 
-# Display ML findings in UI table highlighting anomalies
 st.dataframe(df_logs[df_logs["ML_Verdict"] == "🚨 Outlier (Anomalous)"], use_container_width=True)
 
 # --- SMART REGEX IOC EXTRACTOR ---
@@ -171,29 +185,29 @@ tools_schema = [
 
 # --- EXECUTION LOGIC ---
 
-if st.button("Run Comprehensive AI & ML Threat Hunt") or selected_case:
+if st.button("Run Threat Hunt & Save to Database") or selected_case:
     if selected_case and not st.session_state.get('just_ran', False):
-        report_content = selected_case["report"]
+        report_content = selected_case[3]
     else:
         extracted_ips, extracted_hashes = extract_iocs(user_query)
         
-        with st.spinner("AI Agent orchestrating ML anomaly verification, security API lookups, MITRE mapping, and detection engineering..."):
+        with st.spinner("AI Agent orchestrating threat intelligence enrichment, ML analysis, and MITRE mapping..."):
             messages = [
                 {
                     "role": "system",
                     "content": (
-                        "You are an expert elite autonomous AI Cyber Threat Hunter, Machine Learning Security Analyst, and Detection Engineer. "
-                        "Synthesize findings from the unsupervised Isolation Forest ML anomaly model, API telemetry across AbuseIPDB, VirusTotal, and OTX. "
+                        "You are an expert elite autonomous AI Cyber Threat Hunter and Detection Engineer. "
+                        "Analyze raw log inputs, extracted indicators, and ML anomaly metrics, and invoke tools across AbuseIPDB, VirusTotal, and AlienVault OTX. "
                         "Your final response MUST be formatted as a professional SOC Incident Briefing containing:\n"
                         "1. **Executive Summary & Risk Score** (Low/Medium/High/Critical)\n"
-                        "2. **Machine Learning Behavioral Analysis** (Correlating ML outlier scores with network log metrics)\n"
+                        "2. **Machine Learning Behavioral Analysis**\n"
                         "3. **Indicator Breakdown** (Synthesized findings from APIs)\n"
                         "4. **MITRE ATT&CK Framework Mapping** (Markdown table with columns: `Tactic`, `Technique ID`, `Technique Name`, and `Observed Behavioral Description`)\n"
                         "5. **Recommended Hunting & Remediation Actions**\n"
                         "6. **Actionable Detection Engineering** (Valid **Sigma Rule in YAML format** and a **Microsoft Sentinel KQL query**)"
                     )
                 },
-                {"role": "user", "content": f"Log input:\n{user_query}\n\nExtracted IPs: {extracted_ips}\nExtracted Hashes: {extracted_hashes}\nML Model flagged outliers in network traffic for target IPs."}
+                {"role": "user", "content": f"Log input:\n{user_query}\n\nExtracted IPs: {extracted_ips}\nExtracted Hashes: {extracted_hashes}"}
             ]
             
             response = client.chat.completions.create(
@@ -224,19 +238,17 @@ if st.button("Run Comprehensive AI & ML Threat Hunt") or selected_case:
             else:
                 report_content = response_message.content
 
+            # Save investigation permanently to SQLite database
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            st.session_state.history.append({
-                "timestamp": timestamp,
-                "query": user_query,
-                "report": report_content
-            })
+            cursor.execute("INSERT INTO investigations (timestamp, query, report) VALUES (?, ?, ?)", (timestamp, user_query, report_content))
+            db_conn.commit()
 
-    st.subheader("AI Threat Hunter & ML Behavioral Briefing Report")
+    st.subheader("Enterprise AI Threat Hunter & Briefing Report")
     st.markdown(report_content)
 
     st.download_button(
         label="📥 Download Investigation Report (Markdown)",
         data=report_content,
-        file_name=f"AI_ML_SOC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+        file_name=f"Enterprise_SOC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
         mime="text/markdown"
     )
