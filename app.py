@@ -18,6 +18,13 @@ user_query = st.text_area(
     "Can you cross-reference IP address 185.220.101.5, file hash 44d88612fea8a8f36de82e1278abb02f, and map them to MITRE ATT&CK?"
 )
 
+# --- HELPER: TRUNCATE LARGE TOOL RESPONSES ---
+def truncate_json(data_str: str, max_chars: int = 4000) -> str:
+    """Prevents TPM rate limit errors by trimming excessively large API json responses."""
+    if len(data_str) > max_chars:
+        return data_str[:max_chars] + "\n[TRUNCATED DUE TO SIZE]"
+    return data_str
+
 # --- SECURITY API TOOL DEFINITIONS ---
 
 def check_abuse_ipdb(ip_address: str) -> str:
@@ -28,7 +35,7 @@ def check_abuse_ipdb(ip_address: str) -> str:
     params = {"ipAddress": ip_address, "maxAgeInDays": "90"}
     try:
         response = httpx.get(url, headers=headers, params=params, timeout=10)
-        return json.dumps(response.json())
+        return truncate_json(json.dumps(response.json()))
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -39,7 +46,7 @@ def check_virustotal_hash(file_hash: str) -> str:
     headers = {"x-apikey": api_key}
     try:
         response = httpx.get(url, headers=headers, timeout=10)
-        return json.dumps(response.json())
+        return truncate_json(json.dumps(response.json()))
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -58,7 +65,7 @@ def check_otx_indicator(indicator: str, indicator_type: str = "IPv4") -> str:
     headers = {"X-OTX-API-KEY": api_key}
     try:
         response = httpx.get(url, headers=headers, timeout=10)
-        return json.dumps(response.json())
+        return truncate_json(json.dumps(response.json()))
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -132,8 +139,9 @@ if st.button("Run Threat Hunt & Map ATT&CK"):
             {"role": "user", "content": user_query}
         ]
         
+        # Switched model to gpt-4o-mini to avoid TPM limits
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=messages,
             tools=tools_schema,
             tool_choice="auto"
@@ -152,7 +160,10 @@ if st.button("Run Threat Hunt & Map ATT&CK"):
                     res = json.dumps({"error": "Tool not found"})
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": res})
             
-            final_response = client.chat.completions.create(model="gpt-4o", messages=messages)
+            final_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
             st.subheader("AI Threat Hunter Briefing & ATT&CK Matrix Report")
             st.markdown(final_response.choices[0].message.content)
         else:
