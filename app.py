@@ -78,6 +78,43 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- AUTHENTICATION STATE SETUP ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "role" not in st.session_state:
+    st.session_state.role = ""
+
+# --- LOGIN SCREEN IF NOT AUTHENTICATED ---
+if not st.session_state.authenticated:
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🛡️ ApexSOC Secure Portal</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8;'>Enterprise Security Operations Center Authentication</p>", unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            username_input = st.text_input("Username")
+            password_input = st.text_input("Password", type="password")
+            submit_login = st.form_submit_button("Authenticate & Enter", use_container_width=True)
+            
+            if submit_login:
+                users_db = {
+                    "analyst": {"password": "password123", "role": "Tier 1 SOC Analyst"},
+                    "manager": {"password": "admin123", "role": "SOC Manager / Admin"}
+                }
+                
+                if username_input in users_db and users_db[username_input]["password"] == password_input:
+                    st.session_state.authenticated = True
+                    st.session_state.username = username_input
+                    st.session_state.role = users_db[username_input]["role"]
+                    st.success("Authentication successful! Initializing secure session...")
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials. Try: `analyst` / `password123` or `manager` / `admin123`")
+        st.stop()
+
 # --- DATABASE SETUP (SQLITE PERSISTENCE) ---
 def init_db():
     conn = sqlite3.connect("soc_workbench.db", check_same_thread=False)
@@ -105,12 +142,21 @@ with col_logo:
     st.markdown("<h1>🛡️</h1>", unsafe_allow_html=True)
 with col_title:
     st.title("ApexSOC™ | Autonomous AI Threat Intelligence & SOAR Workbench")
-    st.markdown("⚡ **Live Operational Command Center** — *Powered by Machine Learning Outlier Detection, Threat Intel Correlators, & Automated SOAR Playbooks*")
+    st.markdown(f"⚡ **Live Operational Command Center** | Logged in as: **{st.session_state.username.capitalize()}** (*Role: {st.session_state.role}*)")
 
 st.markdown("---")
 
-# --- SIDEBAR: ENHANCED CASE MANAGEMENT TOOLBAR ---
+# --- SIDEBAR: ENHANCED CASE MANAGEMENT & AUTH CONTROLS ---
 st.sidebar.markdown("### 🎛️ SOC Operations Bar")
+st.sidebar.markdown(f"👤 **User**: {st.session_state.username}")
+st.sidebar.markdown(f"🛡️ **Clearance**: {st.session_state.role}")
+
+if st.sidebar.button("🔒 Logout"):
+    st.session_state.authenticated = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+    st.rerun()
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("📁 Investigation Archive")
 st.sidebar.markdown("Saved cases from persistent SQLite storage:")
@@ -130,10 +176,15 @@ if saved_cases:
         if st.button("📂 Load"):
             selected_case = saved_cases[selected_index]
     with col_sb2:
-        if st.button("🗑️ Purge", type="secondary"):
-            cursor.execute("DELETE FROM investigations")
-            db_conn.commit()
-            st.rerun()
+        # Manager restricted action
+        if st.session_state.role == "SOC Manager / Admin":
+            if st.button("🗑️ Purge", type="secondary"):
+                cursor.execute("DELETE FROM investigations")
+                db_conn.commit()
+                st.rerun()
+        else:
+            if st.button("🗑️ Purge", disabled=True):
+                pass
 else:
     st.sidebar.info("✨ No active cases logged in storage.")
 
@@ -171,7 +222,7 @@ col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
     st.metric("Total Analyzed Flows", len(df_logs), delta="Real-time buffer")
 with col_m2:
-    st.metric("Outliers Flagged", len(df_logs[df_logs["ML Verdict"] == "🚨 High-Risk Outlier"]), delta="Anomaly threshold 3%", delta_color="inverse")
+    st.metric("Outliers Flagged", len(df_logs[df_logs["ML Verdict"] == "🚨 High-Risk Outlier"], delta="Anomaly threshold 3%", delta_color="inverse")
 with col_m3:
     st.metric("Model Status", "Active / Online", delta="Isolation Forest")
 
@@ -361,25 +412,25 @@ if st.button("🚀 Execute Autonomous Threat Hunt & Save Briefing", use_containe
 
     with col_soar1:
         if st.button("🔥 Block IP on Firewall"):
-            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action: Blocked malicious IP `{target_ip}` on perimeter firewall ruleset."
+            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action ({st.session_state.username}): Blocked malicious IP `{target_ip}` on perimeter firewall ruleset."
             st.session_state.soar_logs.append(log_entry)
             st.success(f"IP {target_ip} blocked successfully!")
 
     with col_soar2:
         if st.button("💻 Isolate Host Endpoint"):
-            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action: Network isolation command sent to EDR agent for workstation WS-089."
+            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action ({st.session_state.username}): Network isolation command sent to EDR agent for workstation WS-089."
             st.session_state.soar_logs.append(log_entry)
             st.success("Endpoint WS-089 isolated from corporate network!")
 
     with col_soar3:
         if st.button("🔑 Revoke User Sessions"):
-            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action: Active Directory tokens revoked and sessions terminated for flagged accounts."
+            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action ({st.session_state.username}): Active Directory tokens revoked and sessions terminated for flagged accounts."
             st.session_state.soar_logs.append(log_entry)
             st.success("User sessions successfully revoked!")
 
     with col_soar4:
         if st.button("🎫 Create ServiceNow Incident"):
-            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action: P1 Incident Ticket #INC-98241 created in ServiceNow with attached telemetry."
+            log_entry = f"[{datetime.now().strftime('%H:%M:%S')}] SOAR Action ({st.session_state.username}): P1 Incident Ticket #INC-98241 created in ServiceNow with attached telemetry."
             st.session_state.soar_logs.append(log_entry)
             st.success("ServiceNow Incident #INC-98241 created!")
 
