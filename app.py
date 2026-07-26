@@ -8,14 +8,20 @@ import streamlit as st
 load_dotenv()
 client = OpenAI()
 
-st.set_page_config(page_title="AI SOC Threat Hunter", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="AI SOC Threat Hunter Workbench", page_icon="🛡️", layout="wide")
 
 st.title("🛡️ AI-Assisted SOC Threat Hunter Workbench")
-st.markdown("Enter an incident prompt or paste suspicious indicators to trigger autonomous agent enrichment.")
+st.markdown("Autonomous threat intelligence enrichment mapped directly to the **MITRE ATT&CK Framework**.")
 
-user_query = st.text_area("Investigation Query / Log Artifacts:", "Can you cross-reference IP address 185.220.101.5 and file hash 44d88612fea8a8f36de82e1278abb02f?")
+user_query = st.text_area(
+    "Investigation Query / Log Artifacts:", 
+    "Can you cross-reference IP address 185.220.101.5, file hash 44d88612fea8a8f36de82e1278abb02f, and map them to MITRE ATT&CK?"
+)
+
+# --- SECURITY API TOOL DEFINITIONS ---
 
 def check_abuse_ipdb(ip_address: str) -> str:
+    """Query AbuseIPDB API to check reputation score and abuse confidence of an IP address."""
     api_key = os.getenv("ABUSEIPDB_API_KEY")
     url = "https://api.abuseipdb.com/api/v2/check"
     headers = {"Key": api_key, "Accept": "application/json"}
@@ -27,6 +33,7 @@ def check_abuse_ipdb(ip_address: str) -> str:
         return json.dumps({"error": str(e)})
 
 def check_virustotal_hash(file_hash: str) -> str:
+    """Query VirusTotal API to check file hash reputation and detection statistics."""
     api_key = os.getenv("VIRUSTOTAL_API_KEY")
     url = f"https://www.virustotal.com/api/v3/files/{file_hash}"
     headers = {"x-apikey": api_key}
@@ -36,10 +43,32 @@ def check_virustotal_hash(file_hash: str) -> str:
     except Exception as e:
         return json.dumps({"error": str(e)})
 
+def check_otx_indicator(indicator: str, indicator_type: str = "IPv4") -> str:
+    """Query AlienVault OTX API to find community threat pulses associated with an IP, domain, or file hash."""
+    api_key = os.getenv("OTX_API_KEY")
+    
+    if indicator_type.lower() in ["ip", "ipv4", "ipv6"]:
+        path_type = "IPv4"
+    elif indicator_type.lower() in ["file", "hash"]:
+        path_type = "file"
+    else:
+        path_type = "domain"
+        
+    url = f"https://otx.alienvault.com/api/v1/indicators/{path_type}/{indicator}/general"
+    headers = {"X-OTX-API-KEY": api_key}
+    try:
+        response = httpx.get(url, headers=headers, timeout=10)
+        return json.dumps(response.json())
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 available_tools = {
     "check_abuse_ipdb": check_abuse_ipdb,
-    "check_virustotal_hash": check_virustotal_hash
+    "check_virustotal_hash": check_virustotal_hash,
+    "check_otx_indicator": check_otx_indicator
 }
+
+# --- OPENAI FUNCTION SCHEMAS ---
 
 tools_schema = [
     {
@@ -65,15 +94,40 @@ tools_schema = [
                 "required": ["file_hash"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_otx_indicator",
+            "description": "Query AlienVault OTX for threat intelligence pulses associated with an IP, domain, or file hash.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "indicator": {"type": "string", "description": "The IP, domain, or hash to look up."},
+                    "indicator_type": {"type": "string", "description": "Type of indicator: 'IPv4', 'file', or 'domain'"}
+                },
+                "required": ["indicator", "indicator_type"]
+            }
+        }
     }
 ]
 
-if st.button("Run Threat Hunt"):
-    with st.spinner("AI Agent analyzing and querying security APIs..."):
+# --- EXECUTION LOGIC ---
+
+if st.button("Run Threat Hunt & Map ATT&CK"):
+    with st.spinner("AI Agent analyzing intelligence and mapping MITRE ATT&CK techniques..."):
         messages = [
             {
                 "role": "system",
-                "content": "You are an expert autonomous AI Cyber Threat Hunter. Analyze inputs, invoke tools, and synthesize reports."
+                "content": (
+                    "You are an expert elite autonomous AI Cyber Threat Hunter. "
+                    "Analyze analyst prompts, invoke tools across AbuseIPDB, VirusTotal, and AlienVault OTX, and synthesize telemetry. "
+                    "Your final response MUST be formatted as a professional SOC Incident Briefing containing the following sections:\n"
+                    "1. **Executive Summary & Risk Score** (Low/Medium/High/Critical)\n"
+                    "2. **Indicator Breakdown** (Synthesized findings from APIs)\n"
+                    "3. **MITRE ATT&CK Framework Mapping** (Rendered as a Markdown table with columns: `Tactic`, `Technique ID`, `Technique Name`, and `Observed Behavioral Description`)\n"
+                    "4. **Recommended Hunting & Remediation Actions**"
+                )
             },
             {"role": "user", "content": user_query}
         ]
@@ -99,7 +153,7 @@ if st.button("Run Threat Hunt"):
                 messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": res})
             
             final_response = client.chat.completions.create(model="gpt-4o", messages=messages)
-            st.subheader("AI Threat Hunter Briefing Report")
+            st.subheader("AI Threat Hunter Briefing & ATT&CK Matrix Report")
             st.markdown(final_response.choices[0].message.content)
         else:
             st.subheader("AI Response")
