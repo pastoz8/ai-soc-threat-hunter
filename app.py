@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import httpx
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -16,7 +17,7 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 st.title("🛡️ AI-Assisted SOC Threat Hunter Workbench")
-st.markdown("Autonomous threat intelligence, **MITRE ATT&CK mapping**, and **Automated Detection Engineering** with Case Management.")
+st.markdown("Autonomous threat intelligence, **MITRE ATT&CK mapping**, **Automated Detection Engineering**, and **Smart IOC Extraction**.")
 
 # --- SIDEBAR: CASE HISTORY ARCHIVE ---
 st.sidebar.title("📁 Investigation Cases")
@@ -24,7 +25,7 @@ st.sidebar.markdown("Active session history of threat hunts:")
 
 selected_case = None
 if st.session_state.history:
-    case_titles = [f"Case #{i+1}: {c['query'][:35]}..." for i, c in enumerate(st.session_state.history)]
+    case_titles = [f"Case #{i+1}: {c['query'][:30]}..." for i, c in enumerate(st.session_state.history)]
     selected_index = st.sidebar.selectbox("Select Past Investigation", range(len(case_titles)), format_func=lambda x: case_titles[x])
     if st.sidebar.button("Load Selected Case"):
         selected_case = st.session_state.history[selected_index]
@@ -35,9 +36,21 @@ if st.sidebar.button("Clear History"):
     st.session_state.history = []
     st.rerun()
 
-# Main Input Form
-default_query = selected_case["query"] if selected_case else "Can you cross-reference IP address 185.220.101.5, file hash 44d88612fea8a8f36de82e1278abb02f, map them to MITRE, and generate a Sigma rule?"
-user_query = st.text_area("Investigation Query / Log Artifacts:", default_query)
+# Main Input Form (Simulating a messy SIEM log or incident ticket)
+default_query = selected_case["query"] if selected_case else """[ALERT] Potential C2 beacon detected on workstation WS-089. 
+Raw log snippet: Connection established from internal IP 10.0.4.5 to external suspicious IP 185.220.101.5 over port 443. 
+Associated dropped file hash on disk: 44d88612fea8a8f36de82e1278abb02f. Please investigate and map to MITRE ATT&CK."""
+
+user_query = st.text_area("Paste Messy SIEM Log, Email Header, or Incident Ticket:", default_query, height=130)
+
+# --- SMART REGEX IOC EXTRACTOR ---
+def extract_iocs(text: str):
+    """Automatically parses IPs, hashes (MD5/SHA256), and domains from unstructured log text."""
+    # IPv4 regex pattern
+    ips = list(set(re.findall(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', text)))
+    # Hash regex pattern (MD5, SHA1, SHA256)
+    hashes = list(set(re.findall(r'\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b', text)))
+    return ips, hashes
 
 # --- HELPER: TRUNCATE LARGE TOOL RESPONSES ---
 def truncate_json(data_str: str, max_chars: int = 4000) -> str:
@@ -135,28 +148,36 @@ tools_schema = [
 
 # --- EXECUTION LOGIC ---
 
-if st.button("Run Threat Hunt & Generate Detection Rule") or selected_case:
-    # If a past case was loaded from the sidebar, display it directly
+if st.button("Extract IOCs & Run Automated Threat Hunt") or selected_case:
     if selected_case and not st.session_state.get('just_ran', False):
         report_content = selected_case["report"]
-        query_used = selected_case["query"]
     else:
-        with st.spinner("AI Agent analyzing intelligence, mapping ATT&CK, and writing detection engineering rules..."):
+        # Step A: Automatically extract IOCs from raw text
+        extracted_ips, extracted_hashes = extract_iocs(user_query)
+        
+        # Display parsed indicators dynamically in the UI
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"**Parsed IPs Detected:** {extracted_ips if extracted_ips else 'None'}")
+        with col2:
+            st.warning(f"**Parsed File Hashes Detected:** {extracted_hashes if extracted_hashes else 'None'}")
+
+        with st.spinner("AI Agent orchestrating intelligence enrichment, MITRE mapping, and detection engineering..."):
             messages = [
                 {
                     "role": "system",
                     "content": (
                         "You are an expert elite autonomous AI Cyber Threat Hunter and Detection Engineer. "
-                        "Analyze analyst prompts, invoke tools across AbuseIPDB, VirusTotal, and AlienVault OTX, and synthesize telemetry. "
+                        "Analyze the raw log input and extracted indicators, invoke tools across AbuseIPDB, VirusTotal, and AlienVault OTX, and synthesize telemetry. "
                         "Your final response MUST be formatted as a professional SOC Incident Briefing containing the following sections:\n"
                         "1. **Executive Summary & Risk Score** (Low/Medium/High/Critical)\n"
-                        "2. **Indicator Breakdown** (Synthesized findings from APIs)\n"
+                        "2. **Indicator Breakdown** (Synthesized findings from APIs for the extracted IOCs)\n"
                         "3. **MITRE ATT&CK Framework Mapping** (Rendered as a Markdown table with columns: `Tactic`, `Technique ID`, `Technique Name`, and `Observed Behavioral Description`)\n"
                         "4. **Recommended Hunting & Remediation Actions**\n"
-                        "5. **Actionable Detection Engineering** (Provide a valid, clean **Sigma Rule in YAML format** and a **Microsoft Sentinel KQL query** designed to hunt for the investigated IOCs across enterprise telemetry)"
+                        "5. **Actionable Detection Engineering** (Provide a valid, clean **Sigma Rule in YAML format** and a **Microsoft Sentinel KQL query**)"
                     )
                 },
-                {"role": "user", "content": user_query}
+                {"role": "user", "content": f"Here is the raw log/ticket text to investigate:\n{user_query}\n\nDetected IPs: {extracted_ips}\nDetected Hashes: {extracted_hashes}"}
             ]
             
             response = client.chat.completions.create(
@@ -194,10 +215,9 @@ if st.button("Run Threat Hunt & Generate Detection Rule") or selected_case:
                 "query": user_query,
                 "report": report_content
             })
-            query_used = user_query
 
     # Display Report
-    st.subheader(f"AI Threat Hunter Briefing Report")
+    st.subheader("AI Threat Hunter Briefing & Detection Report")
     st.markdown(report_content)
 
     # Download Report Button
