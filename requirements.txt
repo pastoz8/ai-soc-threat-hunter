@@ -2,3 +2,6 @@ streamlit
 openai
 httpx
 python-dotenv
+scikit-learn
+pandas
+numpy

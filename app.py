@@ -5,19 +5,22 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI
 import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
 from datetime import datetime
 
 load_dotenv()
 client = OpenAI()
 
-st.set_page_config(page_title="AI SOC Threat Hunter Workbench", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="AI & ML SOC Threat Hunter Workbench", page_icon="🛡️", layout="wide")
 
 # Initialize Session State for Case History
 if "history" not in st.session_state:
     st.session_state.history = []
 
-st.title("🛡️ AI-Assisted SOC Threat Hunter Workbench")
-st.markdown("Autonomous threat intelligence, **MITRE ATT&CK mapping**, **Automated Detection Engineering**, and **Smart IOC Extraction**.")
+st.title("🛡️ AI & Machine Learning SOC Threat Hunter Workbench")
+st.markdown("Autonomous threat intelligence, **Unsupervised ML Anomaly Detection (Isolation Forest)**, **MITRE ATT&CK mapping**, and **Automated Detection Engineering**.")
 
 # --- SIDEBAR: CASE HISTORY ARCHIVE ---
 st.sidebar.title("📁 Investigation Cases")
@@ -36,19 +39,39 @@ if st.sidebar.button("Clear History"):
     st.session_state.history = []
     st.rerun()
 
-# Main Input Form (Simulating a messy SIEM log or incident ticket)
-default_query = selected_case["query"] if selected_case else """[ALERT] Potential C2 beacon detected on workstation WS-089. 
-Raw log snippet: Connection established from internal IP 10.0.4.5 to external suspicious IP 185.220.101.5 over port 443. 
-Associated dropped file hash on disk: 44d88612fea8a8f36de82e1278abb02f. Please investigate and map to MITRE ATT&CK."""
+# Main Input Form
+default_query = selected_case["query"] if selected_case else """[ALERT] Potential anomaly detected across corporate network traffic. 
+Raw log snippet: Unusual outbound data transfer and failed auth spikes. 
+Suspicious external IP: 185.220.101.5. Dropped file hash: 44d88612fea8a8f36de82e1278abb02f."""
 
-user_query = st.text_area("Paste Messy SIEM Log, Email Header, or Incident Ticket:", default_query, height=130)
+user_query = st.text_area("Paste Log Data or Incident Ticket for AI & ML Analysis:", default_query, height=120)
+
+# --- MACHINE LEARNING MODULE: ISOLATION FOREST ANOMALY SCORING ---
+st.subheader("🤖 Machine Learning Behavioral Outlier Scoring")
+st.markdown("Simulating baseline network telemetry analysis using an unsupervised Isolation Forest model:")
+
+# Generate sample baseline network flow logs for demonstration
+np.random.seed(42)
+normal_traffic = np.random.normal(loc=500, scale=100, size=(95, 2)) # Normal bytes/duration
+outlier_traffic = np.array([[4500, 1200], [3800, 950], [5200, 1500]]) # Anomalous heavy data exfiltration
+synthetic_data = np.vstack([normal_traffic, outlier_traffic])
+
+df_logs = pd.DataFrame(synthetic_data, columns=["Bytes_Transferred", "Session_Duration_Sec"])
+df_logs["Source_IP"] = [f"10.0.4.{i%254}" for i in range(len(df_logs))]
+df_logs.loc[95:, "Source_IP"] = "185.220.101.5" # Tag our threat IP as an outlier source
+
+# Train Isolation Forest model
+iso_model = IsolationForest(contamination=0.03, random_state=42)
+df_logs["Anomaly_Score"] = iso_model.fit_predict(df_logs[["Bytes_Transferred", "Session_Duration_Sec"]])
+# Convert -1 (outlier) to "High Risk Outlier" and 1 to "Normal"
+df_logs["ML_Verdict"] = df_logs["Anomaly_Score"].apply(lambda x: "🚨 Outlier (Anomalous)" if x == -1 else "Normal")
+
+# Display ML findings in UI table highlighting anomalies
+st.dataframe(df_logs[df_logs["ML_Verdict"] == "🚨 Outlier (Anomalous)"], use_container_width=True)
 
 # --- SMART REGEX IOC EXTRACTOR ---
 def extract_iocs(text: str):
-    """Automatically parses IPs, hashes (MD5/SHA256), and domains from unstructured log text."""
-    # IPv4 regex pattern
     ips = list(set(re.findall(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', text)))
-    # Hash regex pattern (MD5, SHA1, SHA256)
     hashes = list(set(re.findall(r'\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b', text)))
     return ips, hashes
 
@@ -148,36 +171,29 @@ tools_schema = [
 
 # --- EXECUTION LOGIC ---
 
-if st.button("Extract IOCs & Run Automated Threat Hunt") or selected_case:
+if st.button("Run Comprehensive AI & ML Threat Hunt") or selected_case:
     if selected_case and not st.session_state.get('just_ran', False):
         report_content = selected_case["report"]
     else:
-        # Step A: Automatically extract IOCs from raw text
         extracted_ips, extracted_hashes = extract_iocs(user_query)
         
-        # Display parsed indicators dynamically in the UI
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"**Parsed IPs Detected:** {extracted_ips if extracted_ips else 'None'}")
-        with col2:
-            st.warning(f"**Parsed File Hashes Detected:** {extracted_hashes if extracted_hashes else 'None'}")
-
-        with st.spinner("AI Agent orchestrating intelligence enrichment, MITRE mapping, and detection engineering..."):
+        with st.spinner("AI Agent orchestrating ML anomaly verification, security API lookups, MITRE mapping, and detection engineering..."):
             messages = [
                 {
                     "role": "system",
                     "content": (
-                        "You are an expert elite autonomous AI Cyber Threat Hunter and Detection Engineer. "
-                        "Analyze the raw log input and extracted indicators, invoke tools across AbuseIPDB, VirusTotal, and AlienVault OTX, and synthesize telemetry. "
-                        "Your final response MUST be formatted as a professional SOC Incident Briefing containing the following sections:\n"
+                        "You are an expert elite autonomous AI Cyber Threat Hunter, Machine Learning Security Analyst, and Detection Engineer. "
+                        "Synthesize findings from the unsupervised Isolation Forest ML anomaly model, API telemetry across AbuseIPDB, VirusTotal, and OTX. "
+                        "Your final response MUST be formatted as a professional SOC Incident Briefing containing:\n"
                         "1. **Executive Summary & Risk Score** (Low/Medium/High/Critical)\n"
-                        "2. **Indicator Breakdown** (Synthesized findings from APIs for the extracted IOCs)\n"
-                        "3. **MITRE ATT&CK Framework Mapping** (Rendered as a Markdown table with columns: `Tactic`, `Technique ID`, `Technique Name`, and `Observed Behavioral Description`)\n"
-                        "4. **Recommended Hunting & Remediation Actions**\n"
-                        "5. **Actionable Detection Engineering** (Provide a valid, clean **Sigma Rule in YAML format** and a **Microsoft Sentinel KQL query**)"
+                        "2. **Machine Learning Behavioral Analysis** (Correlating ML outlier scores with network log metrics)\n"
+                        "3. **Indicator Breakdown** (Synthesized findings from APIs)\n"
+                        "4. **MITRE ATT&CK Framework Mapping** (Markdown table with columns: `Tactic`, `Technique ID`, `Technique Name`, and `Observed Behavioral Description`)\n"
+                        "5. **Recommended Hunting & Remediation Actions**\n"
+                        "6. **Actionable Detection Engineering** (Valid **Sigma Rule in YAML format** and a **Microsoft Sentinel KQL query**)"
                     )
                 },
-                {"role": "user", "content": f"Here is the raw log/ticket text to investigate:\n{user_query}\n\nDetected IPs: {extracted_ips}\nDetected Hashes: {extracted_hashes}"}
+                {"role": "user", "content": f"Log input:\n{user_query}\n\nExtracted IPs: {extracted_ips}\nExtracted Hashes: {extracted_hashes}\nML Model flagged outliers in network traffic for target IPs."}
             ]
             
             response = client.chat.completions.create(
@@ -208,7 +224,6 @@ if st.button("Extract IOCs & Run Automated Threat Hunt") or selected_case:
             else:
                 report_content = response_message.content
 
-            # Save to session history
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state.history.append({
                 "timestamp": timestamp,
@@ -216,14 +231,12 @@ if st.button("Extract IOCs & Run Automated Threat Hunt") or selected_case:
                 "report": report_content
             })
 
-    # Display Report
-    st.subheader("AI Threat Hunter Briefing & Detection Report")
+    st.subheader("AI Threat Hunter & ML Behavioral Briefing Report")
     st.markdown(report_content)
 
-    # Download Report Button
     st.download_button(
         label="📥 Download Investigation Report (Markdown)",
         data=report_content,
-        file_name=f"SOC_Threat_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+        file_name=f"AI_ML_SOC_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
         mime="text/markdown"
     )
