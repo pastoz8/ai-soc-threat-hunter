@@ -11,11 +11,11 @@ client = OpenAI()
 st.set_page_config(page_title="AI SOC Threat Hunter Workbench", page_icon="🛡️", layout="wide")
 
 st.title("🛡️ AI-Assisted SOC Threat Hunter Workbench")
-st.markdown("Autonomous threat intelligence enrichment mapped directly to the **MITRE ATT&CK Framework**.")
+st.markdown("Autonomous threat intelligence, **MITRE ATT&CK mapping**, and **Automated Detection Engineering**.")
 
 user_query = st.text_area(
     "Investigation Query / Log Artifacts:", 
-    "Can you cross-reference IP address 185.220.101.5, file hash 44d88612fea8a8f36de82e1278abb02f, and map them to MITRE ATT&CK?"
+    "Can you cross-reference IP address 185.220.101.5, file hash 44d88612fea8a8f36de82e1278abb02f, map them to MITRE, and generate a Sigma rule?"
 )
 
 # --- HELPER: TRUNCATE LARGE TOOL RESPONSES ---
@@ -121,25 +121,25 @@ tools_schema = [
 
 # --- EXECUTION LOGIC ---
 
-if st.button("Run Threat Hunt & Map ATT&CK"):
-    with st.spinner("AI Agent analyzing intelligence and mapping MITRE ATT&CK techniques..."):
+if st.button("Run Threat Hunt & Generate Detection Rule"):
+    with st.spinner("AI Agent analyzing intelligence, mapping ATT&CK, and writing detection engineering rules..."):
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are an expert elite autonomous AI Cyber Threat Hunter. "
+                    "You are an expert elite autonomous AI Cyber Threat Hunter and Detection Engineer. "
                     "Analyze analyst prompts, invoke tools across AbuseIPDB, VirusTotal, and AlienVault OTX, and synthesize telemetry. "
                     "Your final response MUST be formatted as a professional SOC Incident Briefing containing the following sections:\n"
                     "1. **Executive Summary & Risk Score** (Low/Medium/High/Critical)\n"
                     "2. **Indicator Breakdown** (Synthesized findings from APIs)\n"
                     "3. **MITRE ATT&CK Framework Mapping** (Rendered as a Markdown table with columns: `Tactic`, `Technique ID`, `Technique Name`, and `Observed Behavioral Description`)\n"
-                    "4. **Recommended Hunting & Remediation Actions**"
+                    "4. **Recommended Hunting & Remediation Actions**\n"
+                    "5. **Actionable Detection Engineering** (Provide a valid, clean **Sigma Rule in YAML format** and a **Microsoft Sentinel KQL query** designed to hunt for the investigated IOCs across enterprise telemetry)"
                 )
             },
             {"role": "user", "content": user_query}
         ]
         
-        # Switched model to gpt-4o-mini to avoid TPM limits
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
@@ -164,7 +164,7 @@ if st.button("Run Threat Hunt & Map ATT&CK"):
                 model="gpt-4o-mini",
                 messages=messages
             )
-            st.subheader("AI Threat Hunter Briefing & ATT&CK Matrix Report")
+            st.subheader("AI Threat Hunter Briefing, ATT&CK, & Detection Report")
             st.markdown(final_response.choices[0].message.content)
         else:
             st.subheader("AI Response")
